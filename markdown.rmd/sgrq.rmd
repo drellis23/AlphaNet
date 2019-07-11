@@ -1,0 +1,546 @@
+---
+title: "Quality of life outcomes in augmented vs augmentation naive patients with AATD related lung disease"
+header-includes:
+- \usepackage{titling}
+- \pretitle{\begin{center}\LARGE\includegraphics[width=12cm]{uobalphanet.png}\\[\bigskipamount]}
+- \posttitle{\end{center}}
+
+author: "AlphaNet & University of Birmingham"
+date: "05/07/2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(pacman) 
+p_load(tidyverse,dplyr,readxl,MatchIt,survival,survminer,BiocManager,Matching,tableone,forcats,kableExtra)
+```
+```{r, include=FALSE}
+#load in files 
+
+
+master_data <- read_excel("AlphaNet Database/Master database/QoL/Alphanet Master raw data only 2019_06_12 V11.0.xlsx", sheet = "Combined (raw)")
+
+sgrq <- read_excel("AlphaNet Database/Master database/QoL/new SGRQ UK data build 2019_07_01 V4.2.xlsx", sheet = "SGRQ data")%>%
+dplyr::select(pid,sgrq_exclusion, sgrq1_age, sgrq1_time_aug,sgrq_count:diff_first_last_time, contains("match"),cohort_year)
+
+
+
+
+
+
+#clean data frames 
+
+master_clean <- master_data %>%
+  dplyr::select(PID,sex,aug_status,aug_year,aug_age,pi,bl_smoking,Lung_disease_LLN_emph) %>% 
+  rename_all(str_to_lower) %>% 
+  mutate(sex = factor(sex, levels = c(0,1), labels = c("Male","Female"))) %>% 
+  mutate(aug_status = factor(aug_status, levels = c(0,1), labels = c("Control","Augmentation"))) %>% 
+  rename(bl_year = aug_year) %>% 
+  mutate(bl_smoking = factor(bl_smoking, levels = c(1,2,3), labels = c("Non-smoker", "Ex-smoker","Current smoker"))) %>% 
+  mutate(aug_age = round(aug_age, digits = 2)) %>% 
+  mutate(pi = factor(pi, levels = c("2","3","4","5","6","7"), labels = c("SZ","Null Null","Z Null","ZZ","other","1 or 3 gene listed"),ordered = FALSE))
+
+#combine data frames 
+
+sgrq_final1 <- inner_join(master_clean, sgrq,"pid") %>%
+  mutate(lung_disease_lln_emph = factor(x = lung_disease_lln_emph, levels = c(0,1))) %>% 
+  mutate(score_at_mcid = as.numeric(score_at_mcid)) %>% 
+  mutate(mcid_met = factor(mcid_met, levels = c(0,1), labels = c("MCID not met","MCID met"))) %>% 
+  mutate(slope = as.numeric(sgrqtotal_slope)) %>% 
+  filter(sgrq_exclusion == 0, lung_disease_lln_emph == 1)
+
+
+
+# set functions for later analyses 
+
+sgrq_post2007 <- sgrq_final1 %>% 
+  filter(bl_year >= 2007)
+
+sgrq_post2007_missing <- na.omit(sgrq_final1)
+
+sgrq_post2008 <- sgrq_final1 %>% 
+  filter(bl_year >= 2008)
+
+sgrqZZ_all<- sgrq_final1 %>% 
+  filter(pi != "SZ")
+
+sgrq_match_all <- sgrq_final1 %>% 
+  filter(match_all > 0)
+
+sgrq_match_2007 <- sgrq_final1 %>% 
+  filter(match_2007 > 0) %>% 
+  filter(bl_year >= 2007)
+
+sgrq_match_2008 <- sgrq_final1 %>% 
+  filter(match_2008 > 0) %>% 
+  filter(bl_year >= 2008)
+
+#get variable names (dput), grouping of variables into myVars (variables), catVars (catagorical variables), and nonnormalVars (non normal Variables)
+
+myVars <- c("sex","sgrq1_age","bl_smoking","pi","mcid_met","survival_mcid","slope")
+catVars <- c("sex","bl_smoking","pi","mcid_met")
+
+nonnormalVars <- c("survival_mcid")
+
+#Survival functions for KM curves 
+
+surv_all <- survival::survfit(survival::Surv(sgrq_final1$survival_mcid) ~ aug_status, data = sgrq_final1)
+
+surv_2007 <- survival::survfit(survival::Surv(sgrq_post2007$survival_mcid) ~ aug_status, data = sgrq_post2007)
+  
+surv_2008 <- survival::survfit(survival::Surv(sgrq_post2008$survival_mcid) ~ aug_status, data = sgrq_post2008)
+
+survZZ_all <- survival::survfit(survival::Surv(sgrqZZ_all$survival_mcid) ~ aug_status, data = sgrqZZ_all)
+
+surv_match_all <- survival::survfit(survival::Surv(sgrq_match_all$survival_mcid) ~ aug_status, data = sgrq_match_all)
+
+surv_match_2007 <- survival::survfit(survival::Surv(sgrq_match_2007$survival_mcid) ~ aug_status, data = sgrq_match_2007)
+
+surv_match_2008 <- survival::survfit(survival::Surv(sgrq_match_2008$survival_mcid) ~ aug_status, data = sgrq_match_2008)
+```
+
+***  
+
+
+This is a report of the preliminary analysis for SGRQ total score between AlphaNet and UK cohorts. The main findngs are summarised in the first section of the report with more detailed breakdown of results in later sections. As for the previously presented mortality data, the cohorts have been split into whole cohort and post 2007/2008 for reasons previously discussed. 
+
+# **Summary of Analysis**
+
+## **Patient Demographics**
+
+Key points
+
+* Successful matching of patients with n=566 for whole cohort, n=278 post 2007 and n = 224 post 2008. 
+* There are no SZ patients for control cohort. We should discuss potentially removing the treatment SZ patients from analysis to compare like with like.
+* Percentage of patients meeting MCID for SGRQ total was higher in augmented patients for whole cohort but similar between groups post 2007. 
+* Slope analysis is presented as points SGRQ/year gained. This shows slower decline in QoL outcomes in the augmentation group across all three cohorts assessed (See bottom line of demographics tables in Section 2.0: Kaplan-Meier survival plots). Only the whole cohort analysis was statistically significant (unmatched and matched).
+* Patient demographic tables are displayed next to the relevent plots in below sections. 
+
+
+
+## **Distribution of SGRQ across groups**
+
+Key points
+
+* There was significant lag between initial baseline assessment and first recorded SGRQ in both groups. This lag is reduced in the post 2007 onwards cohort and therefore is considered the least biased. (See box plot 1.1 - 1.3). 
+* There are a large proportion of patients in the control group who had a long delay between the final SGRQ where MCID was met and the previous SGRQ. This could introduce bias and therefore use of the post 2007 cohort would be better. 
+
+## **Kaplan-Meier Survival - time to MCID** 
+
+
+Key Points
+
+*  Apparent early crossing of K-M curves is likely artifactual due to differences in collection times for SGRQ. 
+*  The stepwise pattern in the control curve is due to SGRQ data being collected on a near annual basis. 
+*  The matched post 2007 analysis (Section 1.6) is likely optimal and at the least risk of bias. 
+
+
+## **Cox Proportional Hazards - time to MCID** 
+
+Key Points
+
+* Post 2007 cohort was chosen as is the least biased in how SGRQ scores was distributed across time but maximises the number of patients. 
+* There is a reduced HR for reaching MCID in augmented patients in post 2007 which means that augmented patients appear to have a slowing in decline in QOL. HR 0.74 (CI 0.62 to 0.9) p = 0.002 (See Figure 3.1: Forest plot for Cox proportional hazards model (post 2007))
+* There is influence of current smoking on HR for achieving MCID. HR 1.57 (CI 1.1 to 2.2) p = 0.014
+* Further analysis needs to be performed to ensure assumptions of proportional hazards are met. This has been started and is presented in Section 3.2. 
+
+
+## **Linear and Logistics Regression - overall change in SGRQ**
+
+Key points
+
+* Linear regression and logistics regression models are not suited to presented our data as SGRQ progression is not linear. R^2^ value for both models was <0.1 suggesting a poor fit. 
+
+## **Data Dictionary**
+
+Below is a data dictionary of variables included in demographics tables. 
+
+Variable Name | Label | Description
+------|--------| ---------
+sex | Sex/gender | -
+sgrq1_age | Age at first SGRQ | -
+bl_smoking | Smoking status (at baseline) | - 
+pi | AATD genotype | -
+mcid_met | MCID met | Was MCID threshold met? Y/N
+survival_mcid | Time to MCID | Time to MCID from first SGRQ. If MCID not met then time from first to last SGRQ
+slope  | Annual change in SGRQ | Slope analysis demonstrating change in SGRQ per year
+aug_status | Aumentation status | -
+
+
+
+# **1.0 Distribution of SGRQ across groups**
+
+The following box plots illustrate the the distibution of SGRQ scores in time between the treatment and control group. This has been split into whole cohort, post 2007 and post 2008 cohorts. Use of post 2007 and post 2008 will explore the impact of the new questionnaire introduced to the treatment group by AlphaNet in 2008.  
+
+## **1.1 Interval time to first SGRQ from baseline assessment** 
+
+Box plots 1.1 to 1.3 show the time from baseline assessment (control) or start of augmentation (treatment group)
+
+```{r boxplot 1.1, echo=FALSE, warning=FALSE}
+
+sgrq_final1 %>% 
+  filter(sgrq_exclusion == 0, lung_disease_lln_emph == 1) %>% 
+  ggplot(mapping = aes(x = aug_status, y = sgrq1_time_aug))+
+  geom_boxplot() +
+  labs(title ="Boxplot 1.1.1Time to first SGRQ total score (all)", subtitle = "from start of augmentation (treatment) or baseline assessment (control)") +
+  xlab("")+
+  ylab("Time (days)")
+
+```
+
+```{r boxplot 1.2, echo=FALSE, warning=FALSE}
+sgrq_final1 %>% 
+  filter(sgrq_exclusion == 0, lung_disease_lln_emph == 1, bl_year >= 2007) %>% 
+  ggplot(mapping = aes(x = aug_status, y = sgrq1_time_aug))+
+  geom_boxplot() +
+  labs(title ="Boxplot 1.1.2: Time to first SGRQ total score (post 2007 only)", subtitle = "from start of augmentation (augmentation) or baseline assessment (control)") +
+  xlab("")+
+  ylab("Time (days)")
+
+```{r boxplot 1.3, echo=FALSE}
+sgrq_final1 %>% 
+  filter(sgrq_exclusion == 0, lung_disease_lln_emph == 1, bl_year >= 2008) %>% 
+  ggplot(mapping = aes(x = aug_status, y = sgrq1_time_aug))+
+  geom_boxplot() +
+  labs(title ="Boxplot 1.1.3: Time to first SGRQ total score (post 2008 only)", subtitle = "from start of augmentation (augmentation) or baseline assessment (control)") +
+  xlab("")+
+  ylab("Time (days)")
+
+```
+
+Patients seen before 2007 have a significant lag time from baseline/start of augmentation therapy to their first recorded SGRQ score. Use of post 2007 cohort would avoid potential bias. There appears to be no significant difference between the post 2007 and post 2008 groups.  
+
+
+
+## **1.2 Delay between penultimate and final SGRQ**
+
+The following box plots demonstrate the difference between the last and penultime SGRQ scores and times to see if there was a difference between the treatment group and control group. This is because the methods of collection were not the same. A lag time from penultime SGRQ may introduce bias. 
+
+  
+```{r, box plots penultimate time, echo = FALSE, warning=FALSE }
+    
+ 
+ ggplot(data = sgrq_final1) + 
+   geom_boxplot(mapping = aes(x = aug_status,y = dif_penultimate_last_time))+
+   labs(title ="Boxplot 1.2.1: Time from penultimate to last SGRQ if MCID met") +
+  xlab("")+
+  ylab("Time (days)")
+ 
+
+ ggplot(data = sgrq_post2007) + 
+   geom_boxplot(mapping = aes(x = aug_status,y = dif_penultimate_last_time))+
+  labs(title ="Boxplot 1.2.2: Time from penultimate to last SGRQ if MCID met",subtitle = "Post 2007") +
+  xlab("")+
+  ylab("Time (days)")
+
+```
+
+The above boxplots show that for the earlier patients seen in the UK there is a significant delay between their penultiate and final SGRQ when the MCID threshold was crossed. This could introduce bias and therefore it would seem sensible to use post 2007 cohorts instead. 
+
+# **2.0: Kaplan-Meier survival plots**
+
+## **2.1: Whole cohort, unmatched**
+
+### Table 2.1: Demographics of patients from whole cohort, unmatched.
+
+
+```{r demographics table 2.1, echo=FALSE, warning=FALSE}
+
+#tableone for demographic tables 
+tab1 <- tableone::CreateTableOne(vars = myVars,data = sgrq_final1, factorVars = catVars, strata = "aug_status")
+
+#print(tab1, showAllLevels = TRUE)
+
+kableone(print(tab1, nonnormal = nonnormalVars))
+
+#tab1_final <- print(tab1,printToggle = FALSE, noSpaces = TRUE)
+```
+
+
+
+```{r, figure 2.1, echo=FALSE, warning=FALSE}
+
+survminer::ggsurvplot(fit = survival::survfit(survival::Surv(sgrq_final1$survival_mcid) ~ aug_status, data = sgrq_final1), xlab = "Time to MCID (days)", ylab = "Overall Survival Probability", xlim = c(0,3000), title = "Figure 2.1: Time to achieving SGRQ total MCID (survival)", subtitle = "All patients with AATD related lung disease", legend.title = "", legend.labs = c("Control", "Augmentation"), risk.table = TRUE, risk.table.y.text = TRUE, surv.median.line = "hv")
+
+```
+
+
+
+```{r, echo=FALSE, warning=FALSE}
+kable(surv_median(surv_all), align = "c", col.names = c("Group","Median (days)","Lower","Upper"))
+```
+```{r, echo=FALSE, warning=FALSE}
+kable(surv_pvalue(surv_all),align = "c", col.names = c("Variable", "p value", "Method", "p value"), digits = c(0,3,0,3))
+```
+
+
+
+
+## **2.2: Post 2007 (unmatched)**
+
+### Table 2.2: Demographics of patients from 2007 onwards (unmatched).
+
+```{r demographics table 1.2,echo=FALSE, warning=FALSE}
+#tableone for demographic tables 
+tab1 <- tableone::CreateTableOne(vars = myVars,data = sgrq_post2007, factorVars = catVars, strata = "aug_status")
+
+#print(tab1, showAllLevels = TRUE)
+
+kableone(print(tab1, nonnormal = nonnormalVars))
+
+#tab1_final <- print(tab1,printToggle = FALSE, noSpaces = TRUE)
+```
+
+
+```{r, figure 2.2, echo=FALSE, warning=FALSE}
+
+survminer::ggsurvplot(fit = survival::survfit(survival::Surv(sgrq_post2007$survival_mcid) ~ aug_status, data = sgrq_post2007), xlab = "Time to MCID (days)", ylab = "Overall Survival Probability", xlim = c(0,3000), title = "Figure 2.2: Time to achieving SGRQ total MCID (survival)", subtitle = "Post 2007 with AATD related lung disease", legend.title = "", legend.labs = c("Control", "Augmentation"), risk.table = TRUE, risk.table.y.text = FALSE, surv.median.line = "hv")
+```
+
+```{r, echo=FALSE, warning=FALSE}
+kable(surv_median(surv_2007), align = "c", col.names = c("Group","Median (days)","Lower","Upper"))
+```
+```{r, echo=FALSE, warning=FALSE}
+kable(surv_pvalue(surv_2007),align = "c", col.names = c("Variable", "p value", "Method", "p value"), digits = c(0,3,0,3))
+```
+
+
+
+## **2.3: Post 2008 (unmatched)**
+
+### Table 2.3: Demographics of patients from 2008 onwards (unmatched).
+
+```{r demographics table 2.3,echo=FALSE, warning=FALSE}
+#tableone for demographic tables 
+tab1 <- tableone::CreateTableOne(vars = myVars,data = sgrq_post2008, factorVars = catVars, strata = "aug_status")
+
+#print(tab1, showAllLevels = TRUE)
+
+kableone(print(tab1, nonnormal = nonnormalVars))
+
+#tab1_final <- print(tab1,printToggle = FALSE, noSpaces = TRUE)
+```
+
+
+```{r, figure 2.3, echo=FALSE, warning=FALSE}
+
+survminer::ggsurvplot(fit = survival::survfit(survival::Surv(sgrq_post2008$survival_mcid) ~ aug_status, data = sgrq_post2008), xlab = "Time to MCID (days)", ylab = "Overall Survival Probability", xlim = c(0,3000), title = "Figure 2.3: Time to achieving SGRQ total MCID (survival)", subtitle = "Post 2008 with AATD related lung disease", legend.title = "", legend.labs = c("Control", "Augmentation"), risk.table = TRUE, risk.table.y.text = FALSE, surv.median.line = "hv")
+
+```
+
+```{r, echo=FALSE, warning=FALSE}
+kable(surv_median(surv_2008), align = "c", col.names = c("Group","Median (days)","Lower","Upper"))
+```
+```{r, echo=FALSE, warning=FALSE}
+kable(surv_pvalue(surv_2007),align = "c", col.names = c("Variable", "p value", "Method", "p value"), digits = c(0,3,0,3))
+```
+
+
+
+## **2.4: Whole cohort (matched)**
+
+Patients were matched on age +/-3 years, sex, baseline smoking, cohort year.
+
+### Table 2.4: Demographics of patients from whole cohort (matched)
+```{r demographics table 2.4,echo=FALSE, warning=FALSE}
+#tableone for demographic tables 
+tab1 <- tableone::CreateTableOne(vars = myVars,data = sgrq_match_all, factorVars = catVars, strata = "aug_status")
+
+#print(tab1, showAllLevels = TRUE)
+
+kableone(print(tab1, nonnormal = nonnormalVars))
+
+#tab1_final <- print(tab1,printToggle = FALSE, noSpaces = TRUE)
+```
+
+
+```{r, figure 2.4, echo=FALSE, warning=FALSE}
+
+survminer::ggsurvplot(fit = survival::survfit(survival::Surv(sgrq_match_all$survival_mcid) ~ aug_status, data = sgrq_match_all), xlab = "Time to MCID (days)", ylab = "Overall Survival Probability", xlim = c(0,3000), title = "Figure 2.4: Time to achieving SGRQ total MCID", subtitle = "Matched patients with AATD related lung disease", legend.title = "", legend.labs = c("Control", "Augmentation"), risk.table = TRUE, risk.table.y.text = TRUE, surv.median.line = "hv")
+
+```
+
+```{r, echo=FALSE, warning=FALSE}
+kable(surv_median(surv_match_all), align = "c", col.names = c("Group","Median (days)","Lower","Upper"))
+```
+```{r, echo=FALSE, warning=FALSE}
+kable(surv_pvalue(surv_match_all),align = "c", col.names = c("Variable", "p value", "Method", "p value"), digits = c(0,3,0,3))
+```
+
+
+## **2.5: Post 2007 (matched)**
+
+Patients were matched on age +/-3 years, sex, baseline smoking, cohort year.
+
+### Table 2.5: Demographics of patients from whole cohort (matched)
+```{r demographics table 2.5,echo=FALSE, warning=FALSE}
+#tableone for demographic tables 
+tab1 <- tableone::CreateTableOne(vars = myVars,data = sgrq_match_2007, factorVars = catVars, strata = "aug_status")
+
+#print(tab1, showAllLevels = TRUE)
+
+kableone(print(tab1, nonnormal = nonnormalVars))
+
+#tab1_final <- print(tab1,printToggle = FALSE, noSpaces = TRUE)
+```
+
+
+```{r, figure 1.6, echo=FALSE, warning=FALSE}
+
+survminer::ggsurvplot(fit = survival::survfit(survival::Surv(sgrq_match_2007$survival_mcid) ~ aug_status, data = sgrq_match_2007), xlab = "Time to MCID (days)", ylab = "Overall Survival Probability", xlim = c(0,3000), title = "Figure 2.5: Time to achieving SGRQ total MCID", subtitle = "Matched patients post 2007", legend.title = "", legend.labs = c("Control", "Augmentation"), risk.table = TRUE, risk.table.y.text = TRUE, surv.median.line = "hv")
+
+```
+
+```{r, echo=FALSE, warning=FALSE}
+kable(surv_median(surv_match_2007), align = "c", col.names = c("Group","Median (days)","Lower","Upper"))
+```
+```{r, echo=FALSE, warning=FALSE}
+kable(surv_pvalue(surv_match_2007),align = "c", col.names = c("Variable", "p value", "Method", "p value"), digits = c(3,3,3,3))
+```
+
+## **2.6: Post 2008 (matched)**
+
+Patients were matched on age +/-3 years, sex, baseline smoking, cohort year.
+
+### Table 2.6: Demographics of patients from whole cohort (matched)
+```{r demographics table 2.6,echo=FALSE, warning=FALSE}
+#tableone for demographic tables 
+tab1 <- tableone::CreateTableOne(vars = myVars,data = sgrq_match_2008, factorVars = catVars, strata = "aug_status")
+
+#print(tab1, showAllLevels = TRUE)
+
+kableone(print(tab1, nonnormal = nonnormalVars))
+
+#tab1_final <- print(tab1,printToggle = FALSE, noSpaces = TRUE)
+```
+
+
+```{r, figure 2.6, echo=FALSE, warning=FALSE}
+
+survminer::ggsurvplot(fit = survival::survfit(survival::Surv(sgrq_match_2008$survival_mcid) ~ aug_status, data = sgrq_match_2008), xlab = "Time to MCID (days)", ylab = "Overall Survival Probability", xlim = c(0,3000), title = "Figure 2.6: Time to achieving SGRQ total MCID", subtitle = "Matched patients post 2008", legend.title = "", legend.labs = c("Control", "Augmentation"), risk.table = TRUE, risk.table.y.text = TRUE, surv.median.line = "hv")
+
+```
+
+```{r, echo=FALSE, warning=FALSE}
+kable(surv_median(surv_match_2008), align = "c", col.names = c("Group","Median (days)","Lower","Upper"))
+```
+```{r, echo=FALSE, warning=FALSE}
+kable(surv_pvalue(surv_match_2008),align = "c", col.names = c("Variable", "p value", "Method", "p value"), digits = c(0,3,0,3))
+```
+
+For the K-M plots there is typically more than 1 cross point. This occurs early on in the curve. For the control group there is a stepwise trajectory of time to MCID compared with a smooth curve for the treatment group. This is for two reasons. Firstly, there are more patients for the Augmentation cohort and therefore any noise will be reduced. Secondly, Control participants were seen annually. The steps correspond closely to Days 365, 730 and 1095. Treatment group patients had their SGRQ measured at more variable and often shorter time variables.   
+For the Control group (red) curve during the first ~365 days there are no 'events' (MCID met). This is because the MCID cannot physically be met until the second SGRQ performed. It may be true that patients met their MCID earlier than this but were not tested. This highlights the difference in how SGRQ data was collected between augmentation and control groups.
+Matching improves the similarities between groups but reduces the numbers. The post 2007 matched cohort would be a good compromise. 
+
+# **3.0 Cox regression survival plots: time to MCID for SGRQ total**
+
+
+The following analysis will use cox regression analysis looking at survival times to reaching MCID threshold. As cox regressions take covariates into consideration unmatched cohorts will be used.   
+
+The covariates used are as follows: 1) age at time of first SGRQ total score, 2) sex, 3) smoking status at baseline (non-smoker, ex-smoker and current smoker) and 4) treatment (augmentation and control). Cohort year was not used as all patients are post 2007 by definition.   
+
+The post 2007 cohort was chosen for analysis since it reduces the risk of bias introduced by long lead times to first SGRQ but maximises the number of patients for analysis.The following sections presents a forest plot of hazard ratios and tests assumptions of the Cox regression model.  
+
+
+
+## **3.1 Results of Cox regression**
+
+### Table 3.1: Patient demographics (post 2007)
+
+```{r demographics table 3.1,echo=FALSE, warning=FALSE}
+#tableone for demographic tables 
+tab1 <- tableone::CreateTableOne(vars = myVars,data = sgrq_post2007, factorVars = catVars, strata = "aug_status")
+
+#print(tab1, showAllLevels = TRUE)
+
+kableone(print(tab1, nonnormal = nonnormalVars))
+
+#tab1_final <- print(tab1,printToggle = FALSE, noSpaces = TRUE)
+```
+
+
+
+```{r, echo = FALSE, warning=FALSE}
+
+
+fit <- coxph(Surv(survival_mcid)~ strata(aug_status) + sex + sgrq1_age + bl_smoking,data = as.data.frame(sgrq_post2007))
+
+fit1 <- coxph(Surv(survival_mcid)~ aug_status + sex + sgrq1_age + bl_smoking, data = as.data.frame(sgrq_post2007))
+
+#ggadjustedcurves(fit, data = as.data.frame(sgrq_post2007), xlim = c(0,3000),palette = c("red2","blue2"), title = "Figure 2.1: Cox proportional hazards plot (post 2007)", xlab = "Time (days)", legend.title = "", variable variable = aug_status)
+
+
+
+```
+
+ 
+
+```{r, echo = FALSE, warning=FALSE}
+ggforest(fit1, data =sgrq_post2007, main = "Figure 3.1: Forest plot for Cox proportional hazards model (post 2007)", noDigits = 2)
+```
+
+
+The above Forest plot appears to demonstrate a reduced HR for patients receiving augmentation therapy compared with control (HR 0.74, CI 0.62 to 0.9, p = 0.002). Current smokers had a HR of 1.57 (1.10 - 2.2, p = 0.014). 
+The n numbers for current smokers was small (n = 45) and therefore it may be sensible to combine the smoking variables into never or ever smokers. There is non-significant effect from sex and age. 
+In the next section we will examine if the assumptions fo the cox proportional hazard has been met. 
+
+## **3.2 Checking Assumptions of Cox regression**
+
+As mentioned above regarding K-M, there is crossing of the survival curves, typically at near the start which cannot be fully explained by the SGRQ collection methods. This in principle breaches one of the assumption of survival models and therefore it can be debated if a cox regression is a suitable analysis choice. For the purpose of discussion I have included the cox regression analysis and the testing of assumptions. 
+
+### 3.2.1 Testing Proportional Hazard Assumptions - Schoenfeld residuals
+
+NB. A none random pattern for each variable demonstrates proportional hazards. The y-axis labels overlap and are difficult to read. The order from left to right is as follows: Top row: sex, age. Second row: ex smoker, current smoker. Third row: augmentation 
+
+```{r, echo = FALSE, warning=FALSE}
+fit = coxph(Surv(survival_mcid)~ strata(aug_status) + sex + sgrq1_age + bl_smoking, data = as.data.frame(sgrq_post2007))
+
+fit1 = coxph(Surv(survival_mcid)~ aug_status + sex + sgrq1_age + bl_smoking, data = as.data.frame(sgrq_post2007))
+
+fit2 = coxph(Surv(survival_mcid)~sex + sgrq1_age + bl_smoking + aug_status, data = as.data.frame(sgrq_post2007))
+
+test.ph <- cox.zph(fit2)
+ 
+ #cox.zph(fit2)
+
+ ggcoxzph(test.ph)
+```
+
+Table 3.2.1 Schoenfeld residuals summary table
+Variable |rho |chisq |p 
+--------|----------|------------|----------
+sex (Female)|                 0.0248| 0.398| 0.5280
+Age |               -0.0194| 0.301| 0.5834
+Smoking (Ex-smoker)|      -0.0733| 3.674| 0.0553
+Smoking (Current Smoker| -0.0609| 2.622| 0.1054
+Treatment Group (Augmentation)|   -0.0325| 0.726| 0.3943
+GLOBAL    |                    NA| 5.176|| 0.3947
+
+### 3.2.2 Testing Non-linearity
+
+NB - Non-linearity applies to continuous variables only (SGRQ age in this case)
+
+#ggcoxfunctional(Surv(time, status) ~ age + log(age) + sqrt(age), data = lung)
+
+```{r, echo=FALSE, warning=FALSE}
+ggcoxfunctional(Surv(survival_mcid)~ sgrq1_age +log(sgrq1_age)+sqrt(sgrq1_age), data = as.data.frame(sgrq_post2007),ylim = c(-1,1))
+```
+
+
+# **4.0 Exploring use of linear regression for Analysis** 
+
+The overall model for linear regression is a poor fit (R^2^) and therefore will not be used. See below plots and tables which demonstrates this. 
+
+```{r, echo = FALSE, warning=FALSE}
+model1 <- lm(diff_first_last_sgrq~diff_first_last_time+aug_status+sgrq1_age, data = sgrq_post2007)
+
+plot(model1)
+
+summary(model1)
+```
+
+
+
+

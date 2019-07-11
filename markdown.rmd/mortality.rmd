@@ -1,0 +1,101 @@
+---
+title: Comparison of outcomes in augmentation naïve and augmented patients with alpha-1
+  antitrypsin deficiency related lung disease
+author: "Paul Ellis"
+date: "09/07/2019"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(pacman) 
+p_load(tidyverse,dplyr,readxl,MatchIt,survival,survminer,BiocManager,Matching,tableone,forcats,kableExtra)
+```
+```{r, include=FALSE}
+#load in files 
+
+setwd("~/Desktop/")
+master_data <- read_excel("AlphaNet Database/Master database/QoL/Alphanet Master raw data only 2019_06_12 V11.0.xlsx", sheet = "Combined (raw)")
+#clean data frames 
+
+master_clean <- master_data %>%
+  dplyr::select(PID,sex,aug_status,aug_year,aug_age,pi,aug_smoking,bl_smoking,Lung_disease_LLN_emph,status,status_txcensor_r,status_txdeath_r,lung_tx,Liver_tx,survivalT_aug,survivalT_aug_integer,exclusion_analysis,match1) %>% 
+  rename_all(str_to_lower) %>% 
+  mutate(sex = factor(sex, levels = c(0,1), labels = c("Male","Female"))) %>% 
+  mutate(aug_status = factor(aug_status, levels = c(0,1), labels = c("Control","Augmentation"))) %>% 
+  rename(bl_year = aug_year) %>% 
+  mutate(bl_smoking = factor(bl_smoking, levels = c(1,2,3), labels = c("Non-smoker", "Ex-smoker","Current smoker"))) %>%
+  mutate(aug_smoking = factor(aug_smoking, levels = c(1,2,3), labels = c("Non-smoker", "Ex-smoker","Current smoker"))) %>%
+  mutate(aug_age = round(aug_age, digits = 2)) %>% 
+  mutate(lung_tx = factor(lung_tx, levels = c(0,1), labels = c("Not transplanted", "Lung Transplant"))) %>% 
+  mutate(pi = factor(pi, levels = c("2","3","4","5","6","7"), labels = c("SZ","Null Null","Z Null","ZZ","other","1 or 3 gene listed"),ordered = FALSE))
+
+#combine data frames 
+
+mortality_final1 <- master_clean %>%
+  mutate(lung_disease_lln_emph = factor(x = lung_disease_lln_emph, levels = c(0,1))) %>% 
+  filter(exclusion_analysis == 0, lung_disease_lln_emph == 1)
+
+
+mortality_all <- mortality_final1 %>%
+  rename(AAT_Phenotype = pi) %>%
+  rename(Sex = sex) %>% 
+  rename(Smoking = aug_smoking) %>% 
+  rename(Lung_Transplant = lung_tx) %>% 
+  rename(Age = aug_age) %>% 
+  rename(Survival = survivalt_aug_integer) %>%
+  rename(Mortality = status_txcensor_r) %>%
+  filter(exclusion_analysis == 0, lung_disease_lln_emph == 1,match1 >= 1)
+
+
+#get variable names (dput), grouping of variables into myVars (variables), catVars (catagorical variables), and nonnormalVars (non normal Variables)
+
+
+myVars1 <- c("Sex","Age","Smoking","AAT_Phenotype","Lung_Transplant","Mortality","Survival")
+
+catVars1 <- c("Sex","AT_Phenotype","Lung_Transplant","Mortality")
+
+nonnormalVars1 <- c("Survival")
+
+# mortality survival functions 
+
+surv_all <- survival::survfit(survival::Surv(mortality_all$Survival) ~ aug_status, data = mortality_all)
+
+
+
+```
+
+Table 1 - Demographics table for matched augmentation and control patients.
+```{r,echo = FALSE,warning=FALSE}
+#tableone for demographic tables 
+tab2 <- tableone::CreateTableOne(vars = myVars1,data = mortality_all, factorVars = catVars1, strata = "aug_status")
+
+#print(tab1, showAllLevels = TRUE)
+
+kableone(print(tab2, nonnormal = nonnormalVars1))
+
+#tab1_final <- print(tab1,printToggle = FALSE, noSpaces = TRUE)
+```
+
+
+
+```{r, mortality KM whole cohort, echo = FALSE,warning=FALSE}
+survminer::ggsurvplot(fit = survival::survfit(survival::Surv(mortality_all$Survival,mortality_all$Mortality) ~ aug_status, data = mortality_all), xlab = "Time (years)", ylab = "Overall Survival Probability", xlim = c(0,20), title = "Kaplan-Meier Survival plot:", subtitle = "matched patients with AATD related lung disease", legend.title = "", legend.labs = c("Control", "Augmentation"), risk.table = TRUE, risk.table.y.text = TRUE,pval = TRUE)
+
+```
+```{r, mortality KM whole cohort tx as death, echo = FALSE,warning=FALSE}
+survminer::ggsurvplot(fit = survival::survfit(survival::Surv(mortality_all$Survival,mortality_all$status_txdeath_r) ~ aug_status, data = mortality_all), xlab = "Time (years)", ylab = "Overall Survival Probability", xlim = c(0,20), title = "Kaplan-Meier Survival plot:", subtitle = "matched patients with AATD related lung disease", legend.title = "", legend.labs = c("Control", "Augmentation"), risk.table = TRUE, risk.table.y.text = TRUE,pval = TRUE)
+
+```
+
+```{r, echo=FALSE, warning=FALSE}
+#kable(surv_median(surv_all), align = "c", col.names = c("Group","Median (years)","Lower","Upper"))
+```
+
+
+```{r, echo=FALSE, warning=FALSE}
+#kable(surv_pvalue(surv_all),align = "c", col.names = c("Variable", "p value", "Method", "p value"), digits = c(0,3,0,3))
+```
